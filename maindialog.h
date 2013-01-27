@@ -3,6 +3,7 @@
 
 #include <QDialog>
 #include <QLabel>
+#include <QComboBox>
 
 class MainDialog : public QDialog
 {
@@ -21,7 +22,10 @@ public slots:
 private:
     QString *imagePath;
     QLabel *preview24;
+    QComboBox *bmpOrient;
+    QLabel *turnOrient;
     int orient;
+    ushort bpp;
     void resizeEvent(QResizeEvent *);
 };
 

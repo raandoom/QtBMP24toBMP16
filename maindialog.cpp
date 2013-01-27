@@ -1,11 +1,16 @@
 #include <QBoxLayout>
 #include <QPushButton>
-#include <QComboBox>
 #include <QFileDialog>
 #include <QProcess>
 #include "maindialog.h"
 
-unsigned short checkBMPbpp(QString path);
+#define ORIENT_DEFAULT      0
+#define ORIENT_FROM_TOP     1
+#define ORIENT_FROM_BOTTOM  2
+
+ushort checkBMPbpp(QString path);
+uint getBMPorient(QString path);
+void bmp16Turn(QString srcPath, QString destPath);
 void convert24to16(QString srcPath, QString destPath, int orient);
 
 MainDialog::MainDialog(QWidget *parent) :
@@ -23,14 +28,17 @@ MainDialog::MainDialog(QWidget *parent) :
     mainL->addWidget(preview24);
     QPushButton *open24 = new QPushButton("Open", this);
     QLabel *orientLabel = new QLabel("Save with orientation:", this);
-    QComboBox *bmpOrient = new QComboBox(this);
+    bmpOrient = new QComboBox(this);
     bmpOrient->addItem("as source image");
     bmpOrient->addItem("from top to bottom");
     bmpOrient->addItem("from bottom to top");
+    turnOrient = new QLabel(this);
+    turnOrient->hide();
     QPushButton *save16 = new QPushButton("Save", this);
     mainL->addWidget(open24);
     mainL->addWidget(orientLabel);
     mainL->addWidget(bmpOrient);
+    mainL->addWidget(turnOrient);
     mainL->addWidget(save16);
 
     connect(open24, SIGNAL(clicked()), this, SLOT(openClicked()));
@@ -53,7 +61,8 @@ void MainDialog::openClicked()
     {
         return;
     }
-    if (checkBMPbpp(tempPath) != 24)
+    bpp = checkBMPbpp(tempPath);
+    if ((bpp != 24) && (bpp != 16))
     {
         QDialog *warning = new QDialog(this);
         warning->setAttribute(Qt::WA_DeleteOnClose);
@@ -61,7 +70,8 @@ void MainDialog::openClicked()
         warning->setWindowTitle("Warning!");
         QVBoxLayout *warningL = new QVBoxLayout(warning);
         warning->setLayout(warningL);
-        QLabel *warningT = new QLabel("Selected image is not a 24-bit *.bmp!");
+        QLabel *warningT = new QLabel(
+                    "Selected image is not a 24-bit or 16-bit *.bmp!");
         warningL->addWidget(warningT);
         QPushButton *warningBtn = new QPushButton("Close", warning);
         warningL->addWidget(warningBtn);
@@ -69,6 +79,26 @@ void MainDialog::openClicked()
         warning->show();
         return;
     }
+
+    if (bpp == 16)
+    {
+        bmpOrient->hide();
+        turnOrient->show();
+
+        uint orient16 = getBMPorient(tempPath);
+        if (orient16 == ORIENT_FROM_TOP)
+            orient = ORIENT_FROM_BOTTOM;
+        else if (orient16 == ORIENT_FROM_BOTTOM)
+            orient = ORIENT_FROM_TOP;
+
+        turnOrient->setText(bmpOrient->itemText(orient));
+    }
+    else if (bpp == 24)
+    {
+        turnOrient->hide();
+        bmpOrient->show();
+    }
+
     imagePath = new QString(tempPath);
     preview24->setPixmap(
                 QPixmap::fromImage(
@@ -92,7 +122,10 @@ void MainDialog::saveClicked()
     }
     if (tempPath.right(4).compare(".bmp", Qt::CaseInsensitive) != 0)
         tempPath.append(".bmp");
+    if (bpp == 24)
     convert24to16(*imagePath, tempPath, orient);
+    else if (bpp == 16)
+        bmp16Turn(*imagePath, tempPath);
 }
 //==============================================================================
 void MainDialog::resizeEvent(QResizeEvent *)

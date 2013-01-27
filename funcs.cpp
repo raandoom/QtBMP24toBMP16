@@ -7,7 +7,7 @@
 #define ORIENT_FROM_TOP     1
 #define ORIENT_FROM_BOTTOM  2
 
-void initStruct(char* data, unsigned int count)
+void initStruct(char* data, uint count)
 {
     while (count !=0)
     {
@@ -15,16 +15,15 @@ void initStruct(char* data, unsigned int count)
         data[count] = 0;
     }
 }
-//==================================================
-
-unsigned short checkBMPbpp(QString pathImage)
+//==============================================================================
+ushort checkBMPbpp(QString pathImage)
 {
     // check for "BM" and return bpp
     QFile readf(pathImage);
     readf.open(QIODevice::ReadOnly);
     QDataStream streamIn(&readf);
     streamIn.setByteOrder(QDataStream::LittleEndian);
-    unsigned short imageType;
+    ushort imageType;
     streamIn >> imageType;
     if (imageType != 0x4D42)
     {
@@ -32,12 +31,144 @@ unsigned short checkBMPbpp(QString pathImage)
         return 0;
     }
     readf.seek(28);
-    unsigned short bpp;
+    ushort bpp;
     streamIn >> bpp;
     readf.close();
     return bpp;
 }
-//==================================================
+//==============================================================================
+uint getBMPorient(QString path)
+{
+    QFile image(path);
+    image.open(QIODevice::ReadOnly);
+    QDataStream stream(&image);
+    stream.setByteOrder(QDataStream::LittleEndian);
+
+    int height;
+
+    image.seek(22);
+    stream >> height;
+    image.close();
+
+    if (height < 0) return ORIENT_FROM_TOP;
+    else return ORIENT_FROM_BOTTOM;
+}
+//==============================================================================
+void bmp16Turn(QString srcPath, QString destPath)
+{
+    QFile readf(srcPath);
+    QFile writef(destPath);
+    readf.open(QIODevice::ReadOnly);
+    writef.open(QIODevice::WriteOnly);
+    QDataStream streamIn(&readf);
+    streamIn.setByteOrder(QDataStream::LittleEndian);
+    QDataStream streamOut(&writef);
+    streamOut.setByteOrder(QDataStream::LittleEndian);
+
+    BITMAPFILEHEADER imageSrc;
+    initStruct((char*)&imageSrc, 14);
+    // make bmp header for src 16
+    streamIn >> imageSrc.bfType;
+    streamIn >> imageSrc.bfSize;
+    streamIn >> imageSrc.bfReserved1;
+    streamIn >> imageSrc.bfReserved2;
+    streamIn >> imageSrc.bfOffBits;
+
+    BITMAPINFOHEADER infoSrc;
+    initStruct((char*)&infoSrc, 40);
+    // make bmp info for src 16
+    streamIn >> infoSrc.biSize;
+    streamIn >> infoSrc.biWidth;
+    streamIn >> infoSrc.biHeight;
+    streamIn >> infoSrc.biPlanes;
+    streamIn >> infoSrc.biBitCount;
+    streamIn >> infoSrc.biCompression;
+    streamIn >> infoSrc.biSizeImage;
+    streamIn >> infoSrc.biXPelsPerMeter;
+    streamIn >> infoSrc.biYPelsPerMeter;
+    streamIn >> infoSrc.biClrUsed;
+    streamIn >> infoSrc.biClrImportant;
+
+    // check zero-padding
+    int padding = (infoSrc.biWidth * 2) % 4;
+
+    BITMAPFILEHEADER imageDest;
+    initStruct((char*)&imageDest, 14);
+    // make bmp header for dest 16
+    imageDest.bfOffBits = 0x42;
+    imageDest.bfReserved2 = imageSrc.bfReserved2;
+    imageDest.bfReserved1 = imageSrc.bfReserved1;
+    imageDest.bfSize =
+            ((infoSrc.biWidth * 2) + padding) * qAbs(infoSrc.biHeight) +
+            imageDest.bfOffBits;
+    imageDest.bfType = imageSrc.bfType;
+
+    BITMAPINFOHEADER infoDest;
+    initStruct((char*)&infoDest, 40);
+    // make bmp info for dest 16
+    infoDest.biSize = 0x28;
+    infoDest.biWidth = infoSrc.biWidth;
+    infoDest.biHeight = - infoSrc.biHeight;
+    infoDest.biPlanes = infoSrc.biPlanes;
+    infoDest.biBitCount = infoSrc.biBitCount;
+    infoDest.biCompression = 3;
+    infoDest.biSizeImage = infoSrc.biSizeImage;
+    infoDest.biXPelsPerMeter = infoSrc.biXPelsPerMeter;
+    infoDest.biYPelsPerMeter = infoSrc.biYPelsPerMeter;
+    infoDest.biClrUsed = infoSrc.biClrUsed;
+    infoDest.biClrImportant = infoSrc.biClrImportant;
+
+    streamOut << imageDest.bfType;
+    streamOut << imageDest.bfSize;
+    streamOut << imageDest.bfReserved1;
+    streamOut << imageDest.bfReserved2;
+    streamOut << imageDest.bfOffBits;
+
+    streamOut << infoDest.biSize;
+    streamOut << infoDest.biWidth;
+    streamOut << infoDest.biHeight;
+    streamOut << infoDest.biPlanes;
+    streamOut << infoDest.biBitCount;
+    streamOut << infoDest.biCompression;
+    streamOut << infoDest.biSizeImage;
+    streamOut << infoDest.biXPelsPerMeter;
+    streamOut << infoDest.biYPelsPerMeter;
+    streamOut << infoDest.biClrUsed;
+    streamOut << infoDest.biClrImportant;
+    streamOut << 0xF800; // red
+    streamOut << 0x7E0; // green
+    streamOut << 0x1F; // blue
+
+    // start turn
+    int h = qAbs(infoSrc.biHeight);
+    ushort pixel;
+
+    readf.seek(imageSrc.bfOffBits);
+    writef.seek(imageDest.bfOffBits +
+                ((infoDest.biWidth * 2) + padding) * (h - 1));
+
+    while (h != 0)
+    {
+        uint w = infoSrc.biWidth;
+        while (w != 0)
+        {
+            streamIn >> pixel;
+            streamOut << pixel;
+            w--;
+        }
+        if (padding != 0)
+        {
+            streamIn >> pixel;
+            streamOut << pixel;
+        }
+        h--;
+        writef.seek(imageDest.bfOffBits +
+                    ((infoDest.biWidth * 2) + padding) * (h - 1));
+    }
+    readf.close();
+    writef.close();
+}
+//==============================================================================
 void convert24to16(QString srcPath, QString destPath, int orient)
 {
     bool turn;
@@ -141,8 +272,8 @@ void convert24to16(QString srcPath, QString destPath, int orient)
 
     // start convert
     int h = qAbs(info24.biHeight);
-    unsigned char r, g, b;
-    unsigned short rgb16;
+    uchar r, g, b;
+    ushort rgb16;
 
     readf.seek(image24.bfOffBits);
     if (turn)
@@ -153,7 +284,7 @@ void convert24to16(QString srcPath, QString destPath, int orient)
 
     while (h != 0)
     {
-        unsigned int w = info24.biWidth;
+        uint w = info24.biWidth;
         while (w != 0)
         {
             streamIn >> b;
@@ -168,7 +299,7 @@ void convert24to16(QString srcPath, QString destPath, int orient)
         }
         if (srcPadding != 0)
         {
-            unsigned char trash;
+            uchar trash;
             for (int i = 0; i < srcPadding; i++) // read unneeded bytes to trash
             {
                 streamIn >> trash;
@@ -176,7 +307,7 @@ void convert24to16(QString srcPath, QString destPath, int orient)
         }
         if (destPadding != 0)
         {
-            unsigned char p = 0;
+            uchar p = 0;
             for (int i = 0; i < destPadding; i++)
             {
                 streamOut << p;
